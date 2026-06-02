@@ -6,6 +6,22 @@
 #include <vector>
 #include <algorithm>
 #include <signal.h>
+#include <filesystem>
+
+/*
+My-Shell: A UNIX Shell implementation in C++
+1- register signals (SIGTSTP, SIGCHLD) with their handlers
+2- implement signal handlers: SIGTSTP to stop foreground process anytime with CTRL+Z
+   and SIGCHLD to remove zombie processes and print a message when a process ends
+3- implement user input loop and print current path as prompt
+4- implement command "logout" to exit the shell with error handling
+5- implement command "stop <pid>" and "cont <pid>" to stop and continue processes by their PID
+6- parse the user input , check if the command ends with & (background), handle errors, save it in a vector
+7- implement command "cd <path>"
+8- translate the vector to a C-Array for execvp
+9- forking
+10- print the list of processes
+*/
 
 struct Prozess{
     pid_t pid;
@@ -42,20 +58,23 @@ void sigtstp_handler(int){
     }
 }
 
+int cd(const std::string &path){
+    return chdir(path.c_str());
+}
+
+
+
 int main() {
-    //Initialisierung der Signale
     signal(SIGTSTP, sigtstp_handler);
     signal(SIGCHLD, sigchld_handler);
     
     while (true) {
-        //input der Befehle
         std::string input;
-        std::cout << "myshell> ";
+        std::string currentPath = std::filesystem::current_path().string();
+        std::cout << currentPath<< "$ "<<"myshell> ";
         std::getline(std::cin, input);
 
-        //logout zum Beenden
         if (input == "logout") {
-            //Überprüfen, ob Hintergrundprozesse laufen
             bool hintergrund_da = false;
             for (const auto & prozess : prozesse){
                 if (prozess.hintergrund){
@@ -82,7 +101,6 @@ int main() {
             else continue;
         }
 
-        //Befehl stop
         if (input.rfind("stop ", 0) == 0){
             pid_t pid = std::stoi(input.substr(5));
             kill(pid, SIGTSTP);
@@ -92,7 +110,6 @@ int main() {
             continue;
         }
 
-        //Befehl cont
         if (input.rfind("cont ", 0) == 0){
             pid_t pid = std::stoi(input.substr(5));
             kill(pid, SIGCONT);
@@ -109,13 +126,11 @@ int main() {
             continue;
         }
 
-        //Befehle zerlegen und in einem Vector speichern
-        // wenn & am Ende ist, dann hintergrund = true und & entfernen
         std::stringstream word(input);
         std::vector<std::string> args;
         std::string arg;
         while (word >> arg) args.push_back(arg);
-        if (args.empty()) continue; //wenn kein Befehl
+        if (args.empty()) continue; 
 
         bool hintergrund = false;
         if (args.back() == "&"){
@@ -123,14 +138,24 @@ int main() {
             args.pop_back();
         }
 
-        //execcp erwartet char* array, dann erst string -> *char
+        if (args[0] == "cd"){
+            if (args.size() < 2){
+                std::cerr<<"Error: No path provided for cd"<<std::endl;
+            }
+            else{
+                if (cd(args[1]) < 0){
+                    perror(args[1].c_str());
+                }
+            }
+            continue;
+        }
+
         std::vector<char*> c_args;
         for (auto &arg : args){
             c_args.push_back(arg.data());
         }
-        c_args.push_back(nullptr); //mit nullptr am Ende wegen execvp
+        c_args.push_back(nullptr); 
 
-        //forken: child führt execvp aus und parent waitpid
         pid_t pid = fork();
         if (pid<0){
             std::cerr<<"Fehler"<<std::endl;
@@ -140,7 +165,7 @@ int main() {
             setpgid(0, 0);
             signal(SIGHUP, SIG_IGN);
             execvp(c_args[0], c_args.data());
-            perror("Fehler bei execvp"); //parsing error
+            perror("Fehler bei execvp"); 
             exit(EXIT_FAILURE);
         }
         else{
@@ -160,7 +185,6 @@ int main() {
             }
         }
 
-        //Prozessliste
         std::cout<<"[Prozesse: ";
         if (prozesse.empty()){
             std::cout<<"Keine Prozesse"<<std::endl;
