@@ -1,6 +1,6 @@
 # Software
 
-A Unix shell written in C++ that supports foreground/background process management, job control and Unix signal handling.
+harishell: A Unix shell written in C++ that supports foreground/background process management, job control and Unix signal handling.
 
 ---
 

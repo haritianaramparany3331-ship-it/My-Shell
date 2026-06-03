@@ -47,7 +47,7 @@ void sigchld_handler(int){
             prozesse.erase(std::remove_if(prozesse.begin(), prozesse.end(), [pid](const Prozess &p){
                 return p.pid == pid;
             }), prozesse.end());
-            std::cout<<"Prozess "<<pid<<" beendet."<<std::endl;
+            std::cout<<"Process "<<pid<<" finished."<<std::endl;
         }
     }
 }
@@ -60,8 +60,9 @@ void sigtstp_handler(int){
                 prozess.gestoppt = true;
             }
         }
-        std::cout<<" [SIGTSTP] an Prozess "<<vordergrund_pid<<" gesendet."<<std::endl;
+        std::cout<<" Process "<<vordergrund_pid<<" stopped with ^Z."<<std::endl;
         vordergrund_pid = -1;
+        return;
     }
     if (!jump_active) return;
     siglongjmp(env, 42);
@@ -70,7 +71,7 @@ void sigtstp_handler(int){
 void sigint_handler(int){
     if (vordergrund_pid > 0){
         kill(vordergrund_pid, SIGINT);
-        std::cout<<" Prozess "<<vordergrund_pid<<" mit ^C beendet."<<std::endl;
+        std::cout<<" Process "<<vordergrund_pid<<" terminated with ^C."<<std::endl;
     }
     if (!jump_active) return;
     siglongjmp(env, 42);
@@ -94,7 +95,7 @@ int main() {
         jump_active = 1;
         std::string input;
         std::string currentPath = std::filesystem::current_path().string();
-        std::cout << currentPath<< "$ "<<"myshell> ";
+        std::cout << currentPath<< "$ "<<"harishell> ";
         if (!std::getline(std::cin, input)){
             std::cout<<std::endl;
             break;
@@ -108,21 +109,21 @@ int main() {
                 }
             }
             if (hintergrund_da){
-                std::cout<<"logout nicht möglich. Es laufen noch Prozesse im Hintergrund:"<<std::endl;
+                std::cout<<"logout not possible. There are still processes running in the background"<<std::endl;
                 for (const auto & prozess : prozesse){
                     if (prozess.hintergrund){
-                        std::cout<<"PID: "<<prozess.pid<<std::endl;
+                        std::cout<<"[ Background: "<<prozess.pid<<" ]"<<std::endl;
                     }
                 }
                 continue;
             }
 
             char antwort;
-            std::cout<<"Wollen Sie wirklich ausloggen? (J/N) ";
+            std::cout<<"Do you really want to logout? (y/n) ";
             std::cin >> antwort;
             std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); 
 
-            bool beenden = (antwort == 'j' || antwort == 'J') ? true : false;
+            bool beenden = (antwort == 'y' || antwort == 'Y') ? true : false;
             if (beenden) break;  
             else continue;
         }
@@ -131,7 +132,32 @@ int main() {
         std::vector<std::string> args;
         std::string arg;
         while (word >> arg) args.push_back(arg);
-        if (args.empty()) continue; 
+        if (args.empty()) continue;
+
+        std::vector<std::string> merged;
+        for (size_t i = 0; i<args.size(); i++){
+            if (args[i].front() == '\'' || args[i].front() == '"'){
+                char q = args[i].front();
+                std::string combined = args[i].substr(1);
+                if (!combined.empty() && combined.back() == q){
+                    combined.pop_back();
+                }
+                else{
+                    while (++i < args.size()){
+                        combined += " " + args[i];
+                        if (args[i].back() == q){
+                            combined.pop_back();
+                            break;
+                        }
+                    }
+                }
+                merged.push_back(combined);
+            }
+            else{
+                merged.push_back(args[i]);
+            }
+        }
+        args = merged;
 
         bool hintergrund = false;
         if (args.back() == "&"){
@@ -145,6 +171,17 @@ int main() {
             for (auto &prozess : prozesse){
                 if (prozess.pid == pid) prozess.gestoppt = true;
             }
+            std::cout<<" Process "<<pid<<" stopped."<<std::endl;
+            std::cout<<"[ Background and stopped processes: ";
+            if (prozesse.empty()){
+                std::cout<<"No processes";
+            }
+            for (const auto &prozess : prozesse){
+                std::cout<<prozess.pid;
+                if(prozess.gestoppt) std::cout<<" (STOP)";
+                std::cout<<" ";
+            }
+            std::cout<<"]"<<std::endl;
             continue;
         }
 
@@ -163,7 +200,7 @@ int main() {
                             prozesse.erase(std::remove_if(prozesse.begin(), prozesse.end(), [pid](const Prozess &p){
                                 return p.pid == pid;
                             }), prozesse.end());
-                            std::cout<<"Vordergrundsprozess "<<pid<<" fertig"<<std::endl;
+                            std::cout<<"Foreground process "<<pid<<" finished."<<std::endl;
                         }
                         else if (WIFSIGNALED(status)){
                             int signal = WTERMSIG(status);
@@ -171,22 +208,22 @@ int main() {
                                 prozesse.erase(std::remove_if(prozesse.begin(), prozesse.end(), [pid](const Prozess &p){
                                     return p.pid == pid;
                                 }), prozesse.end());
-                                std::cout<<"Vordergrundsprozess "<<pid<<" mit ^C beendet."<<std::endl;
+                                std::cout<<"Foreground process "<<pid<<" terminated with ^C."<<std::endl;
                             }
                         }
                     }
                 }
             }
-            std::cout<<"[ Prozesse: ";
+            std::cout<<"[ Background and stopped processes: ";
             if (prozesse.empty()){
-                std::cout<<"Keine Prozesse";
+                std::cout<<"No processes";
             }
             for (const auto &prozess : prozesse){
                 std::cout<<prozess.pid;
                 if(prozess.gestoppt) std::cout<<" (STOP)";
                 std::cout<<" ";
             }
-            std::cout<<" ]"<<std::endl;
+            std::cout<<"]"<<std::endl;
             continue;
         }
 
@@ -210,14 +247,14 @@ int main() {
 
         pid_t pid = fork();
         if (pid<0){
-            std::cerr<<"Fehler"<<std::endl;
+            std::cerr<<"Forking failed"<<std::endl;
             continue;
         }
         else if(pid == 0){
             setpgid(0, 0);
             signal(SIGHUP, SIG_IGN);
             execvp(c_args[0], c_args.data());
-            perror("Fehler bei execvp"); 
+            perror("execvp failed"); 
             exit(EXIT_FAILURE);
         }
         else{
@@ -228,7 +265,7 @@ int main() {
             prozesse.push_back(prozess);
 
             if (hintergrund){
-                std::cout<<"[ Hintergrund: "<<pid<<" ]"<<std::endl;
+                std::cout<<"Process "<<pid<<" started in the background."<<std::endl;
             }
             else{
                 vordergrund_pid = pid;
@@ -239,7 +276,7 @@ int main() {
                     prozesse.erase(std::remove_if(prozesse.begin(), prozesse.end(), [pid](const Prozess &p){
                         return p.pid == pid;
                     }), prozesse.end());
-                    std::cout<<"Vordergrundsprozess "<<pid<<" fertig"<<std::endl;
+                    std::cout<<"Foreground process "<<pid<<" finished."<<std::endl;
                 }
                 else if (WIFSIGNALED(status)){
                     int signal = WTERMSIG(status);
@@ -247,15 +284,15 @@ int main() {
                         prozesse.erase(std::remove_if(prozesse.begin(), prozesse.end(), [pid](const Prozess &p){
                         return p.pid == pid;
                     }), prozesse.end());
-                    std::cout<<"Vordergrundsprozess "<<pid<<" mit ^C beendet."<<std::endl;
+                    std::cout<<"Foreground process "<<pid<<" terminated with ^C."<<std::endl;
                     }
                 }
             }
         }
 
-        std::cout<<"[ Prozesse: ";
+        std::cout<<"[ Background and stopped processes: ";
         if (prozesse.empty()){
-            std::cout<<"Keine Prozesse";
+            std::cout<<"No processes";
         }
         for (const auto &prozess : prozesse){
             std::cout<<prozess.pid;
