@@ -33,19 +33,19 @@ std::vector<Prozess> prozesse;
 pid_t vordergrund_pid = -1;
 
 void sigchld_handler(int){
-    //Zombie entfernen
     int status;
     pid_t pid;
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0){
-        prozesse.erase(std::remove_if(prozesse.begin(), prozesse.end(), [pid](const Prozess &p){
-            return p.pid == pid;
-        }), prozesse.end());
-        std::cout<<"Prozess "<<pid<<" beendet."<<std::endl;
+        if (WIFEXITED(status) || WIFSIGNALED(status)){
+            prozesse.erase(std::remove_if(prozesse.begin(), prozesse.end(), [pid](const Prozess &p){
+                return p.pid == pid;
+            }), prozesse.end());
+            std::cout<<"Prozess "<<pid<<" beendet."<<std::endl;
+        }
     }
 }
 
 void sigtstp_handler(int){
-    //mit CTRL+Z Vordergrundprozess stoppen
     if (vordergrund_pid > 0){
         kill(vordergrund_pid, SIGTSTP);
         for (auto &prozess : prozesse){
@@ -58,6 +58,13 @@ void sigtstp_handler(int){
     }
 }
 
+void sigint_handler(int){
+    if (vordergrund_pid > 0){
+        kill(vordergrund_pid, SIGINT);
+        std::cout<<" Prozess "<<vordergrund_pid<<" mit ^C beendet."<<std::endl;
+    }
+}
+
 int cd(const std::string &path){
     return chdir(path.c_str());
 }
@@ -67,7 +74,7 @@ int cd(const std::string &path){
 int main() {
     signal(SIGTSTP, sigtstp_handler);
     signal(SIGCHLD, sigchld_handler);
-    
+    signal(SIGINT, sigint_handler);
     while (true) {
         std::string input;
         std::string currentPath = std::filesystem::current_path().string();
@@ -118,11 +125,37 @@ int main() {
                     prozess.gestoppt = false;
                     if (!prozess.hintergrund){
                         vordergrund_pid = pid;
-                        waitpid(pid, nullptr, WUNTRACED);
+                        int status;
+                        waitpid(pid, &status, WUNTRACED);
                         vordergrund_pid = -1;
+                        if (WIFEXITED(status)){
+                            prozesse.erase(std::remove_if(prozesse.begin(), prozesse.end(), [pid](const Prozess &p){
+                                return p.pid == pid;
+                            }), prozesse.end());
+                            std::cout<<"Vordergrundsprozess "<<pid<<" fertig"<<std::endl;
+                        }
+                        else if (WIFSIGNALED(status)){
+                            int signal = WTERMSIG(status);
+                            if (signal == SIGINT){
+                                prozesse.erase(std::remove_if(prozesse.begin(), prozesse.end(), [pid](const Prozess &p){
+                                    return p.pid == pid;
+                                }), prozesse.end());
+                                std::cout<<"Vordergrundsprozess "<<pid<<" mit ^C beendet."<<std::endl;
+                            }
+                        }
                     }
                 }
             }
+            std::cout<<"[ Prozesse: ";
+            if (prozesse.empty()){
+                std::cout<<"Keine Prozesse";
+            }
+            for (const auto &prozess : prozesse){
+                std::cout<<prozess.pid;
+                if(prozess.gestoppt) std::cout<<" (STOP)";
+                std::cout<<" ";
+            }
+            std::cout<<" ]"<<std::endl;
             continue;
         }
 
@@ -176,25 +209,41 @@ int main() {
             prozesse.push_back(prozess);
 
             if (hintergrund){
-                std::cout<<"[Hintergrund: "<<pid<<"]"<<std::endl;
+                std::cout<<"[ Hintergrund: "<<pid<<" ]"<<std::endl;
             }
             else{
                 vordergrund_pid = pid;
-                waitpid(pid, nullptr, WUNTRACED);
+                int status;
+                waitpid(pid, &status, WUNTRACED);
                 vordergrund_pid = -1;
+                if (WIFEXITED(status)){
+                    prozesse.erase(std::remove_if(prozesse.begin(), prozesse.end(), [pid](const Prozess &p){
+                        return p.pid == pid;
+                    }), prozesse.end());
+                    std::cout<<"Vordergrundsprozess "<<pid<<" fertig"<<std::endl;
+                }
+                else if (WIFSIGNALED(status)){
+                    int signal = WTERMSIG(status);
+                    if (signal == SIGINT){
+                        prozesse.erase(std::remove_if(prozesse.begin(), prozesse.end(), [pid](const Prozess &p){
+                        return p.pid == pid;
+                    }), prozesse.end());
+                    std::cout<<"Vordergrundsprozess "<<pid<<" mit ^C beendet."<<std::endl;
+                    }
+                }
             }
         }
 
-        std::cout<<"[Prozesse: ";
+        std::cout<<"[ Prozesse: ";
         if (prozesse.empty()){
-            std::cout<<"Keine Prozesse"<<std::endl;
+            std::cout<<"Keine Prozesse";
         }
         for (const auto &prozess : prozesse){
             std::cout<<prozess.pid;
             if(prozess.gestoppt) std::cout<<" (STOP)";
-            std::cout<<", ";
+            std::cout<<" ";
         }
-        std::cout<<"]"<<std::endl;
+        std::cout<<" ]"<<std::endl;
     }   
 
     return 0; 
