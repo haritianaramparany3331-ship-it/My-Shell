@@ -7,12 +7,17 @@
 #include <algorithm>
 #include <signal.h>
 #include <filesystem>
+#include "hilfsfunktionen.h"
+#include <setjmp.h>
 
 /*
 My-Shell: A UNIX Shell implementation in C++
-1- register signals (SIGTSTP, SIGCHLD) with their handlers
-2- implement signal handlers: SIGTSTP to stop foreground process anytime with CTRL+Z
-   and SIGCHLD to remove zombie processes and print a message when a process ends
+1- register signals (SIGTSTP, SIGCHLD, SIGINT) with their handlers
+2- implement signal handlers: SIGTSTP to stop foreground process anytime with CTRL+Z,
+   SIGCHLD to remove zombie processes and print a message when a process ends
+   and SIGINT to end foreground process with CTRL+C
+2- the functions sigsetjmp and siglongjmp are used to return to the main loop after receiving signals without an input,
+   the jump has to be set before siglongjmp is called, therefore a bool flag jump_active
 3- implement user input loop and print current path as prompt
 4- implement command "logout" to exit the shell with error handling
 5- implement command "stop <pid>" and "cont <pid>" to stop and continue processes by their PID
@@ -20,7 +25,7 @@ My-Shell: A UNIX Shell implementation in C++
 7- implement command "cd <path>"
 8- translate the vector to a C-Array for execvp
 9- forking
-10- print the list of processes
+10- print the list of background processes and stopped processes
 */
 
 struct Prozess{
@@ -31,6 +36,8 @@ struct Prozess{
 
 std::vector<Prozess> prozesse;
 pid_t vordergrund_pid = -1;
+static sigjmp_buf env;
+static volatile sig_atomic_t jump_active = 0;
 
 void sigchld_handler(int){
     int status;
@@ -56,6 +63,8 @@ void sigtstp_handler(int){
         std::cout<<" [SIGTSTP] an Prozess "<<vordergrund_pid<<" gesendet."<<std::endl;
         vordergrund_pid = -1;
     }
+    if (!jump_active) return;
+    siglongjmp(env, 42);
 }
 
 void sigint_handler(int){
@@ -63,6 +72,8 @@ void sigint_handler(int){
         kill(vordergrund_pid, SIGINT);
         std::cout<<" Prozess "<<vordergrund_pid<<" mit ^C beendet."<<std::endl;
     }
+    if (!jump_active) return;
+    siglongjmp(env, 42);
 }
 
 int cd(const std::string &path){
@@ -76,10 +87,18 @@ int main() {
     signal(SIGCHLD, sigchld_handler);
     signal(SIGINT, sigint_handler);
     while (true) {
+        if (sigsetjmp(env, 1) == 42){
+            std::cout<<std::endl;
+            continue;   
+        }
+        jump_active = 1;
         std::string input;
         std::string currentPath = std::filesystem::current_path().string();
         std::cout << currentPath<< "$ "<<"myshell> ";
-        std::getline(std::cin, input);
+        if (!std::getline(std::cin, input)){
+            std::cout<<std::endl;
+            break;
+        }
 
         if (input == "logout") {
             bool hintergrund_da = false;
@@ -108,8 +127,20 @@ int main() {
             else continue;
         }
 
-        if (input.rfind("stop ", 0) == 0){
-            pid_t pid = std::stoi(input.substr(5));
+        std::stringstream word(input);
+        std::vector<std::string> args;
+        std::string arg;
+        while (word >> arg) args.push_back(arg);
+        if (args.empty()) continue; 
+
+        bool hintergrund = false;
+        if (args.back() == "&"){
+            hintergrund = true;
+            args.pop_back();
+        }
+
+        if (args[0] == "stop"){
+            pid_t pid = std::stoi(args[1]);
             kill(pid, SIGTSTP);
             for (auto &prozess : prozesse){
                 if (prozess.pid == pid) prozess.gestoppt = true;
@@ -117,8 +148,8 @@ int main() {
             continue;
         }
 
-        if (input.rfind("cont ", 0) == 0){
-            pid_t pid = std::stoi(input.substr(5));
+        if (args[0] == "cont"){
+            pid_t pid = std::stoi(args[1]);
             kill(pid, SIGCONT);
             for (auto &prozess : prozesse){
                 if (prozess.pid == pid){
@@ -157,18 +188,6 @@ int main() {
             }
             std::cout<<" ]"<<std::endl;
             continue;
-        }
-
-        std::stringstream word(input);
-        std::vector<std::string> args;
-        std::string arg;
-        while (word >> arg) args.push_back(arg);
-        if (args.empty()) continue; 
-
-        bool hintergrund = false;
-        if (args.back() == "&"){
-            hintergrund = true;
-            args.pop_back();
         }
 
         if (args[0] == "cd"){
