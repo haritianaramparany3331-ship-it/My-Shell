@@ -16,6 +16,8 @@ harishell: A Unix shell written in C++ that supports foreground/background proce
 - **logout** command with safety checks for running background processes
 - Current working path displayed before each prompt, as in a standard shell
 - Background and stopped processes listed after each command for full visibility
+- Support double or several command input by using the operator: (blank space), `;`, `&&`and `||`
+- Invert the exit status of a command with `!`
 
 ---
 
@@ -45,15 +47,6 @@ Requires a Linux or macOS environment. On Windows, use WSL (Windows Subsystem fo
 - The process list tracks all active background processes and stopped ones.
 
 ---
-
-/*## Limitations
-
-- No support for I/O redirection (`>`, `<`, `|`)
-- No built-in command history
-- No tab completion
-- No GUI
-
----*/
 
 ## Authors and ressources
 Antsa Haritiana Ramparany — computer science student at Hochschule Darmstadt (h_da), Germany
