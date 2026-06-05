@@ -105,7 +105,7 @@ int main() {
         jump_active = 1;
         std::string input;
         std::string currentPath = std::filesystem::current_path().string();
-        std::cout << currentPath<< "$ "<<"harishell> ";
+        std::cout << (last_exit_status != 0 ? "\033[31m" : "") << currentPath << "$ " << "harishell> " << "\033[0m";
         if (!std::getline(std::cin, input)){
             std::cout<<std::endl;
             break;
