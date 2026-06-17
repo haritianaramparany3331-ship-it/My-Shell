@@ -31,17 +31,6 @@ My-Shell: A UNIX Shell implementation in C++
 10- print the list of background processes and stopped processes
 */
 
-struct Prozess{
-    pid_t pid;
-    bool hintergrund;
-    bool gestoppt;
-};
-
-struct Segment{
-    std::vector<std::string> args;
-    std::string op;
-};
-
 std::vector<Prozess> prozesse;
 pid_t vordergrund_pid = -1;
 static sigjmp_buf env;
@@ -86,12 +75,6 @@ void sigint_handler(int){
     if (!jump_active) return;
     siglongjmp(env, 42);
 }
-
-int cd(const std::string &path){
-    return chdir(path.c_str());
-}
-
-
 
 int main() {
     signal(SIGTSTP, sigtstp_handler);
@@ -144,8 +127,17 @@ int main() {
 
         std::vector<Segment> segments;
         std::vector<std::string> current_segment;
+        int parent_depth = 0;
         for (const auto &token : zeile){
-            if (token == ";" || token == "&&" || token == "||"){
+            if (token == "("){
+                parent_depth++;
+                current_segment.push_back(token);
+            }
+            else if (token == ")"){
+                parent_depth--;
+                current_segment.push_back(token);
+            }
+            else if ((token == ";" || token == "&&" || token == "||") && parent_depth == 0){
                 if (!current_segment.empty()){
                     segments.push_back({current_segment, token});
                     current_segment.clear();
@@ -159,183 +151,11 @@ int main() {
             segments.push_back({current_segment, ""});
         }
 
-        std::string last_operator = "";
-        for (auto &segment : segments){
-            bool invert = false;
-            bool run_command = false;
-            if (last_operator == "") run_command = true;
-            else if (last_operator == ";") run_command = true;
-            else if (last_operator == "&&") run_command = (last_exit_status == 0);
-            else if (last_operator == "||") run_command = (last_exit_status != 0);
-            else run_command = false;
-
-            if (run_command){
-                std::vector<std::string> args = segment.args;
-
-                if (args[0] == "!"){
-                    invert = true;
-                    args.erase(args.begin());
-                }
-
-                bool hintergrund = false;
-                if (args.back() == "&"){
-                    hintergrund = true;
-                    args.pop_back();
-                }
-                
-                if (args[0] == "logout") {
-                    bool hintergrund_da = false;
-                    for (const auto & prozess : prozesse){
-                        if (prozess.hintergrund){
-                            hintergrund_da = true;
-                            break;
-                        }
-                    }
-                    if (hintergrund_da){
-                        std::cout<<"logout not possible, the second command will be executed. There are still processes running in the background"<<std::endl;
-                        last_exit_status = 1;
-                        for (const auto & prozess : prozesse){
-                            if (prozess.hintergrund){
-                                std::cout<<"[ Background: "<<prozess.pid<<" ]"<<std::endl;
-                                last_operator = segment.op;
-                                continue;
-                            }
-                        }
-                    }
-                    else{
-                        char antwort;
-                        std::cout<<"Do you really want to logout? (y/n) ";
-                        std::cin >> antwort;
-                        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); 
-
-                        bool beenden = (antwort == 'y' || antwort == 'Y') ? true : false;
-                        if (beenden) {
-                            logout_request = true;  
-                            break;
-                        }
-                        else break;
-                    }
-                }
-
-                if (args[0] == "stop"){
-                    pid_t pid = std::stoi(args[1]);
-                    kill(pid, SIGTSTP);
-                    for (auto &prozess : prozesse){
-                        if (prozess.pid == pid) prozess.gestoppt = true;
-                    }
-                    std::cout<<" Process "<<pid<<" stopped."<<std::endl;
-                    last_operator = segment.op;
-                    continue;
-                }
-
-                if (args[0] == "cont"){
-                    pid_t pid = std::stoi(args[1]);
-                    kill(pid, SIGCONT);
-                    for (auto &prozess : prozesse){
-                        if (prozess.pid == pid){
-                            prozess.gestoppt = false;
-                            if (!prozess.hintergrund){
-                                vordergrund_pid = pid;
-                                int status;
-                                waitpid(pid, &status, WUNTRACED);
-                                vordergrund_pid = -1;
-                                if (WIFEXITED(status)){
-                                    last_exit_status = WEXITSTATUS(status);
-                                    prozesse.erase(std::remove_if(prozesse.begin(), prozesse.end(), [pid](const Prozess &p){
-                                        return p.pid == pid;
-                                    }), prozesse.end());
-                                    std::cout<<"Foreground process "<<pid<<" finished."<<std::endl;
-                                }
-                                else if (WIFSIGNALED(status)){
-                                    last_exit_status = 1;
-                                    int signal = WTERMSIG(status);
-                                    if (signal == SIGINT){
-                                        prozesse.erase(std::remove_if(prozesse.begin(), prozesse.end(), [pid](const Prozess &p){
-                                            return p.pid == pid;
-                                        }), prozesse.end());
-                                        std::cout<<"Foreground process "<<pid<<" terminated with ^C."<<std::endl;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    last_operator = segment.op;
-                    continue;
-                }
-
-                if (args[0] == "cd"){
-                    if (args.size() < 2){
-                    std::cerr<<"Error: No path provided for cd"<<std::endl;
-                    }
-                    else{
-                        if (cd(args[1]) < 0){
-                            perror(args[1].c_str());
-                        }
-                    }
-                    last_operator = segment.op;
-                    continue;
-                }
-
-                std::vector<char*> c_args;
-                for (auto &arg : args){
-                    c_args.push_back(arg.data());
-                }
-                c_args.push_back(nullptr);
-
-                pid_t pid = fork();
-                if (pid<0){
-                    std::cerr<<"Forking failed"<<std::endl;
-                    continue;
-                }
-                else if(pid == 0){
-                    setpgid(0, 0);
-                    signal(SIGHUP, SIG_IGN);
-                    execvp(c_args[0], c_args.data());
-                    perror("execvp failed"); 
-                    exit(EXIT_FAILURE);
-                }
-                else{
-                    Prozess prozess;
-                    prozess.pid = pid;
-                    prozess.hintergrund = hintergrund;
-                    prozess.gestoppt = false;
-                    prozesse.push_back(prozess);
-
-                    if (hintergrund){
-                        std::cout<<"Process "<<pid<<" started in the background."<<std::endl;
-                    }
-                    else{
-                        vordergrund_pid = pid;
-                        int status;
-                        waitpid(pid, &status, WUNTRACED);
-                        vordergrund_pid = -1;
-                        if (WIFEXITED(status)){
-                            last_exit_status = WEXITSTATUS(status);
-                            prozesse.erase(std::remove_if(prozesse.begin(), prozesse.end(), [pid](const Prozess &p){
-                                return p.pid == pid;
-                            }), prozesse.end());
-                            std::cout<<"Foreground process "<<pid<<" finished."<<std::endl;
-                        }
-                        else if (WIFSIGNALED(status)){
-                            last_exit_status = 1;
-                            int signal = WTERMSIG(status);
-                            if (signal == SIGINT){
-                            prozesse.erase(std::remove_if(prozesse.begin(), prozesse.end(), [pid](const Prozess &p){
-                                return p.pid == pid;
-                            }), prozesse.end());
-                            std::cout<<"Foreground process "<<pid<<" terminated with ^C."<<std::endl;
-                            }
-                       }
-                    }
-                }
-
-
-
-            
-            }
-            if (invert) last_exit_status = (last_exit_status == 0) ? 1 : 0;  
-            last_operator = segment.op;
-        }
+        executeSegments(segments,
+                        prozesse,
+                        last_exit_status,
+                        logout_request,
+                        vordergrund_pid);
 
         if (logout_request) break;
 
