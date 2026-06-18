@@ -94,6 +94,19 @@ int main() {
             break;
         }
 
+        while (true){
+            std::string firstLine = input;
+            if (!firstLine.empty() && firstLine.back() == ' '){
+                firstLine.pop_back();
+            }
+            if (firstLine.empty() || firstLine.back() != '\\') break;
+            input = firstLine.substr(0, firstLine.size() - 1);
+            std::cout<<"> ";
+            std::string nextLine;
+            if (!std::getline(std::cin, nextLine)) break;
+            input += " " + nextLine;
+        }
+
         std::stringstream word(input);
         std::vector<std::string> zeile;
         std::string arg;
