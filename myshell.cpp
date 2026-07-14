@@ -150,7 +150,7 @@ int main() {
                 parent_depth--;
                 current_segment.push_back(token);
             }
-            else if ((token == ";" || token == "&&" || token == "||") && parent_depth == 0){
+            else if ((token == ";" || token == "&&" || token == "||" || token == "|") && parent_depth == 0){
                 if (!current_segment.empty()){
                     segments.push_back({current_segment, token});
                     current_segment.clear();

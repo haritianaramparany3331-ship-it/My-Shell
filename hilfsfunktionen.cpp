@@ -10,6 +10,7 @@ void executeSegments(const std::vector<Segment> &segments,
                     bool &logout_request,
                     pid_t &vordergrund_pid){
     std::string last_operator = "";
+    int prev_read = -1;
         for (auto &segment : segments){
             bool invert = false;
             bool run_command = false;
@@ -17,10 +18,16 @@ void executeSegments(const std::vector<Segment> &segments,
             else if (last_operator == ";") run_command = true;
             else if (last_operator == "&&") run_command = (last_exit_status == 0);
             else if (last_operator == "||") run_command = (last_exit_status != 0);
+            else if (last_operator == "|") run_command = true;
             else run_command = false;
 
             if (run_command){
                 std::vector<std::string> args = segment.args;
+
+                int pipefd[2] = {-1, -1};
+                if (segment.op == "|"){
+                    pipe(pipefd);
+                }
 
                 if (args[0] == "!"){
                     invert = true;
@@ -222,11 +229,20 @@ void executeSegments(const std::vector<Segment> &segments,
                 else if(pid == 0){
                     setpgid(0, 0);
                     if (hintergrund) signal(SIGHUP, SIG_IGN);
+                    if (prev_read != -1){
+                        dup2(prev_read, STDIN_FILENO);
+                        close(prev_read);
+                    }
+                    if (pipefd[1] != -1){
+                        dup2(pipefd[1], STDOUT_FILENO);
+                        close(pipefd[1]);
+                    }
                     execvp(c_args[0], c_args.data());
                     perror("execvp failed");
                     exit(EXIT_FAILURE);
                 }
                 else{
+                    if (prev_read != -1) close(prev_read);
                     Prozess prozess;
                     prozess.pid = pid;
                     prozess.hintergrund = hintergrund;
@@ -237,27 +253,34 @@ void executeSegments(const std::vector<Segment> &segments,
                         std::cout<<"Process "<<pid<<" started in the background."<<std::endl;
                     }
                     else{
-                        vordergrund_pid = pid;
-                        int status;
-                        waitpid(pid, &status, WUNTRACED);
-                        vordergrund_pid = -1;
-                        if (WIFEXITED(status)){
-                            last_exit_status = WEXITSTATUS(status);
-                            prozesse.erase(std::remove_if(prozesse.begin(), prozesse.end(), [pid](const Prozess &p){
-                                return p.pid == pid;
-                            }), prozesse.end());
-                            std::cout<<"Foreground process "<<pid<<" finished."<<std::endl;
+                        if (segment.op == "|"){
+                            close(pipefd[1]);
+                            prev_read = pipefd[0];
                         }
-                        else if (WIFSIGNALED(status)){
-                            last_exit_status = 1;
-                            int signal = WTERMSIG(status);
-                            if (signal == SIGINT){
-                            prozesse.erase(std::remove_if(prozesse.begin(), prozesse.end(), [pid](const Prozess &p){
-                                return p.pid == pid;
-                            }), prozesse.end());
-                            std::cout<<"Foreground process "<<pid<<" terminated with ^C."<<std::endl;
+                        else{
+                            prev_read = -1;
+                            vordergrund_pid = pid;
+                            int status;
+                            waitpid(pid, &status, WUNTRACED);
+                            vordergrund_pid = -1;
+                            if (WIFEXITED(status)){
+                                last_exit_status = WEXITSTATUS(status);
+                                prozesse.erase(std::remove_if(prozesse.begin(), prozesse.end(), [pid](const Prozess &p){
+                                    return p.pid == pid;
+                                }), prozesse.end());
+                                std::cout<<"Foreground process "<<pid<<" finished."<<std::endl;
                             }
-                       }
+                            else if (WIFSIGNALED(status)){
+                                last_exit_status = 1;
+                                int signal = WTERMSIG(status);
+                                if (signal == SIGINT){
+                                    prozesse.erase(std::remove_if(prozesse.begin(), prozesse.end(), [pid](const Prozess &p){
+                                        return p.pid == pid;
+                                    }), prozesse.end());
+                                    std::cout<<"Foreground process "<<pid<<" terminated with ^C."<<std::endl;
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -265,5 +288,4 @@ void executeSegments(const std::vector<Segment> &segments,
             if (invert) last_exit_status = (last_exit_status == 0) ? 1 : 0;  
             last_operator = segment.op;
         }
-
 }
