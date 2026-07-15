@@ -1,4 +1,5 @@
 #include "hilfsfunktionen.h"
+#include <fcntl.h>
 
 int cd(const std::string &path){
     return chdir(path.c_str());
@@ -23,6 +24,37 @@ void executeSegments(const std::vector<Segment> &segments,
 
             if (run_command){
                 std::vector<std::string> args = segment.args;
+
+                std::vector<Redirection> redirections;
+                std::vector<std::string> clean_args;
+                for (size_t i = 0; i<args.size(); i++){
+                    const std::string &tok = args[i];
+                    size_t j = 0;
+                    while (j<tok.size() && isdigit(tok[j])) j++;
+                    std::string rest = tok.substr(j);
+                    int explizit_fd = (j>0) ? std::stoi(tok.substr(0, j)) : -1;
+
+                    std::string op = "";
+                    std::string inline_target = "";
+                    for (const std::string &o : {"<>", "<&", ">&", ">>", "<", ">"}){
+                        if (rest.substr(0, o.size()) == o){
+                            op = o;
+                            inline_target = rest.substr(o.size());
+                            break;
+                        }
+                    }
+
+                    if (!op.empty()){
+                        std::string target = (!inline_target.empty()) ? inline_target : args[++i];
+                        int default_fd = (op == ">" || op == ">&" || op == ">>") ? 1 : 0;
+                        int new_fd = (explizit_fd != -1) ? explizit_fd : default_fd;
+                        redirections.push_back({new_fd, op, target});
+                    }
+                    else{
+                        clean_args.push_back(tok);
+                    }
+                }
+                args = clean_args;
 
                 int pipefd[2] = {-1, -1};
                 if (segment.op == "|"){
@@ -234,8 +266,31 @@ void executeSegments(const std::vector<Segment> &segments,
                         close(prev_read);
                     }
                     if (pipefd[1] != -1){
+                        close(pipefd[0]);
                         dup2(pipefd[1], STDOUT_FILENO);
                         close(pipefd[1]);
+                    }
+
+                    for (const auto &redir : redirections){
+                        if (redir.op == "<&" || redir.op == ">&"){
+                            if (redir.target == "-") close(redir.fd);
+                            else{
+                                dup2(std::stoi(redir.target), redir.fd);
+                                continue;
+                            } 
+                        }
+
+                        int flags = redir.op == ">" ? O_CREAT | O_TRUNC  | O_WRONLY
+                                    : redir.op == "<" ? O_RDONLY
+                                    : redir.op == ">>" ? O_CREAT | O_APPEND | O_WRONLY
+                                    :                    O_CREAT | O_RDWR;
+                        int new_fd = open(redir.target.c_str(), flags, 0644);
+                        if (new_fd < 0){
+                            perror(redir.target.c_str());
+                            exit(EXIT_FAILURE);
+                        }
+                        dup2(new_fd, redir.fd);
+                        close(new_fd);
                     }
                     execvp(c_args[0], c_args.data());
                     perror("execvp failed");

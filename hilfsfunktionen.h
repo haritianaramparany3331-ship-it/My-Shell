@@ -17,6 +17,12 @@ struct Segment{
     std::string op;
 };
 
+struct Redirection{
+    int fd;
+    std::string op;
+    std::string target;
+};
+
 struct Prozess{
     pid_t pid;
     bool hintergrund;
