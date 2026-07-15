@@ -9,6 +9,8 @@
 #include <filesystem>
 #include "hilfsfunktionen.h"
 #include <setjmp.h>
+#include <readline/readline.h>
+#include <readline/history.h>
 
 /*
 My-Shell: A UNIX Shell implementation in C++
@@ -88,11 +90,15 @@ int main() {
         jump_active = 1;
         std::string input;
         std::string currentPath = std::filesystem::current_path().string();
-        std::cout << (last_exit_status != 0 ? "\033[31m" : "") << currentPath << "$ " << "harishell> " << "\033[0m";
-        if (!std::getline(std::cin, input)){
+        std::string prompt = (last_exit_status != 0 ? "\033[31m" : "") + currentPath + "$ " + "harishell> " + "\033[0m";
+        char *line = readline(prompt.c_str());
+        if (!line){
             std::cout<<std::endl;
             break;
         }
+        input = std::string(line);
+        if (!input.empty()) add_history(line);
+        free(line);
 
         while (true){
             std::string firstLine = input;
@@ -101,10 +107,10 @@ int main() {
             }
             if (firstLine.empty() || firstLine.back() != '\\') break;
             input = firstLine.substr(0, firstLine.size() - 1);
-            std::cout<<"> ";
-            std::string nextLine;
-            if (!std::getline(std::cin, nextLine)) break;
-            input += " " + nextLine;
+            char *nextLine = readline("> ");
+            if (!nextLine) break;
+            input += " " + std::string(nextLine);
+            free(nextLine);
         }
 
         std::stringstream word(input);
